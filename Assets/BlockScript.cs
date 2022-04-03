@@ -68,7 +68,7 @@ public class BlockScript : MonoBehaviour
 
     public void changeValueTimesTwo()
     {
-        this.value = 2*this.value;
+        value = 2*value;
         GetComponent<Renderer>().material = Resources.Load<Material>("BlockMaterials/Block_"+value.ToString());
         valueText.text = value.ToString();
     }

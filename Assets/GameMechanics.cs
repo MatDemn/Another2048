@@ -1,6 +1,8 @@
 ﻿using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.SceneManagement;
+using System;
 
 public class GameMechanics : MonoBehaviour
 {
@@ -23,9 +25,22 @@ public class GameMechanics : MonoBehaviour
 
     public bool releasedButton;
 
+    public float lastTimeMoved;
+
+    float moveDelay;
+
+    public static Action<int> onScoreUpdate;
+
+    [SerializeField]
+    Camera camRef;
+
+    static Transform gameOverObj;
+
     // Start is called before the first frame update
     void Start()
-    {   
+    {
+        lastTimeMoved = -1f;
+        moveDelay = .5f;
         mergePairs = new List<Pair<GameObject, GameObject>>();
         blocksMoving = 0;
         x_size = 4;
@@ -37,23 +52,61 @@ public class GameMechanics : MonoBehaviour
         terrainObj.GetComponent<Renderer>().material.mainTextureScale = new Vector2(x_size, z_size);
         terrainObj.transform.localScale = new Vector3((float)x_size/10, 1, (float)z_size/10);
         terrainObj.transform.position = new Vector3((x_size-1)*0.5f, 0, (z_size-1)*0.5f);
-        /*
-        for(int i = 0; i<x_size; i++) {
-            for(int j = 0; jz_size; j++) {
-                if(i!=2 || j!=2)
-                    continue;
-                GameObject go = Instantiate(valueBlockPrefab, new Vector3(i,0,j), transform.rotation);
-                go.gameObject.name = $"B{i}_{j}";
-                simulationTable[i, j,0] = go;
+
+        cameraPositionSet();
+
+        
+        Vector3[] cords = new Vector3[2];
+
+        int index = 0;
+        while(true)
+        {
+            int x, z;
+            x = UnityEngine.Random.Range(0, x_size - 1);
+            z = UnityEngine.Random.Range(0, z_size - 1);
+            if(index == 0)
+            {
+                cords[0] = new Vector3(x, 0, z);
+                index++;
             }
+            else
+            {
+                // If other cords than previously added
+                if(cords[0].x != x || cords[0].z != z)
+                {
+                    cords[1] = new Vector3(x, 0, z);
+                    break;
+                }
+            }
+        }
+
+        for (int i = 0; i < cords.Length; i++)
+        {
+            GameObject go = Instantiate(valueBlockPrefab, cords[i], transform.rotation);
+            go.gameObject.name = $"B{cords[i].x}, {cords[i].z}";
+            simulationTable[(int)cords[i].x, (int)cords[i].z, 0] = go;
+        }
+
+        /*
+        Vector3[] cords = new Vector3[16];
+
+        for(int i = 0; i<cords.Length; i++)
+        {
+            cords[i] = new Vector3(i / 4, 0, i % 4);
+        }
+
+        for (int i = 0; i<cords.Length-1; i++) {
+            GameObject go = Instantiate(valueBlockPrefab, cords[i], transform.rotation);
+            go.gameObject.name = $"B{cords[i].x}, {cords[i].z}";
+            simulationTable[(int)cords[i].x, (int)cords[i].z,0] = go;
+            go.GetComponent<BlockScript>().changeValue(1 << (i%12));
         }*/
 
-        Vector3[] cords = new Vector3[] {new Vector3(0,0,0), new Vector3(x_size-1,0,z_size-1) /*, new Vector3(1,0,2), new Vector3(3,0,1)*/};
+        gameOverObj = GameObject.Find("UI").transform.GetChild(1);
 
-        for(int i = 0; i<cords.Length; i++) {
-            GameObject go = Instantiate(valueBlockPrefab, cords[i], transform.rotation);
-            go.gameObject.name = $"B{i}";
-            simulationTable[(int)cords[i].x, (int)cords[i].z,0] = go;
+        if(gameOverObj == null)
+        {
+            Debug.LogError("No gameOverObj found!");
         }
 
         //printSim();
@@ -62,14 +115,20 @@ public class GameMechanics : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        if(canMove) {
+        if(canMove && (Time.time > lastTimeMoved + moveDelay) ) {
             float x_move_temp = Input.GetAxis("Horizontal");
             float z_move_temp = Input.GetAxis("Vertical");
 
-            MoveBlocks(x_move_temp, z_move_temp);
+            if(MoveBlocks(x_move_temp, z_move_temp))
+            {
+                AudioManager.instance.Play("Drag");
+                lastTimeMoved = Time.time;
+            }
         }
+        
     }
-    public void SimulateMove(float x_input, float z_input) {
+    public bool SimulateMove(float x_input, float z_input) {
+        bool anyBlockMoved = false;
         // Right
         if(x_input > 0) {
             for(int z = 0; z<z_size; z++) {
@@ -92,12 +151,14 @@ public class GameMechanics : MonoBehaviour
                                 simulationTable[i,z,1] = simulationTable[i-1,z,0];
                                 simulationTable[i-1, z,0] = null;
                                 mergePairs.Add(new Pair<GameObject, GameObject>(simulationTable[i,z,0], simulationTable[i,z,1]));
+                                anyBlockMoved = true;
                                 break;
                             }
                         }
                         else {
                             simulationTable[i,z,0] = simulationTable[i-1,z,0];
                             simulationTable[i-1,z,0] = null;
+                            anyBlockMoved = true;
                         }
                         
                     }
@@ -126,12 +187,14 @@ public class GameMechanics : MonoBehaviour
                                 simulationTable[i,z,1] = simulationTable[i+1,z,0];
                                 simulationTable[i+1, z,0] = null;
                                 mergePairs.Add(new Pair<GameObject, GameObject>(simulationTable[i,z,0], simulationTable[i,z,1]));
+                                anyBlockMoved = true;
                                 break;
                             }
                         }
                         else {
                             simulationTable[i,z,0] = simulationTable[i+1,z,0];
                             simulationTable[i+1,z,0] = null;
+                            anyBlockMoved = true;
                         }
                     }
                 }
@@ -159,12 +222,14 @@ public class GameMechanics : MonoBehaviour
                                 simulationTable[x,i,1] = simulationTable[x,i-1,0];
                                 simulationTable[x,i-1,0] = null;
                                 mergePairs.Add(new Pair<GameObject, GameObject>(simulationTable[x,i,0], simulationTable[x,i,1]));
+                                anyBlockMoved = true;
                                 break;
                             }
                         }
                         else {
                             simulationTable[x,i,0] = simulationTable[x,i-1,0];
                             simulationTable[x,i-1,0] = null;
+                            anyBlockMoved = true;
                         }
                         
                     }
@@ -193,19 +258,21 @@ public class GameMechanics : MonoBehaviour
                                 simulationTable[x,i,1] = simulationTable[x,i+1,0];
                                 simulationTable[x,i+1,0] = null;
                                 mergePairs.Add(new Pair<GameObject, GameObject>(simulationTable[x,i,0], simulationTable[x,i,1]));
+                                anyBlockMoved = true;
                                 break;
                             }
                         }
                         else {
                             simulationTable[x,i,0] = simulationTable[x,i+1,0];
                             simulationTable[x,i+1,0] = null;
+                            anyBlockMoved = true;
                         }
                         
                     }
                 }
             }
         }
-        return;
+        return anyBlockMoved;
     }
 
     static void printSim() {
@@ -226,76 +293,262 @@ public class GameMechanics : MonoBehaviour
             Debug.Log(res);
         }
     }
-    public void MoveBlocks(float x_input, float z_input) {
-        // Right
-        if(x_input > 0) {
-            canMove = false;
-            SimulateMove(x_input, z_input);
-            for(int z = 0; z<z_size; z++) {
-                for(int x = x_size-1; x>=0; x--) {
-                    if(simulationTable[x,z,0] != null) {
-                        simulationTable[x,z,0].GetComponent<BlockScript>().movePhase(new Vector3(x, 0, z), Vector3.right);
-                        if(simulationTable[x,z,1] != null) {
-                            simulationTable[x,z,1].GetComponent<BlockScript>().movePhase(new Vector3(x, 0, z), Vector3.right);
-                        }
-                    }
+
+    static bool checkIfMovePossible()
+    {
+        // Right move
+        for (int z = 0; z < z_size; z++)
+        {
+            for (int x = x_size - 2; x >= 0; x--)
+            {
+                // If there are any free place on grid, move is always possible
+                if (simulationTable[x, z, 0] == null)
+                {
+                    return true;
                 }
-            }
-        }
-        // Left
-        else if(x_input < 0) {
-            canMove = false;
-            SimulateMove(x_input, z_input);
-            for(int z = 0; z<z_size; z++) {
-                for(int x = 0; x<x_size; x++) {
-                    if(simulationTable[x,z,0] != null) {
-                        simulationTable[x,z,0].GetComponent<BlockScript>().movePhase(new Vector3(x, 0, z), Vector3.left);
-                        if(simulationTable[x,z,1] != null) {
-                            simulationTable[x,z,1].GetComponent<BlockScript>().movePhase(new Vector3(x, 0, z), Vector3.left);
+                // Otherwise, check if this block (x,z) can move
+                int checkVal = simulationTable[x, z, 0].GetComponent<BlockScript>().value;
+                for (int i = x + 1; i < x_size; i++)
+                {
+                    // If there are some block next to it
+                    if (simulationTable[i, z, 0] != null)
+                    {
+                        // Check if it hase the same value. If not, this (x,z) block can't move there,
+                        // break from this loop and check another block
+                        if (simulationTable[i, z, 0].GetComponent<BlockScript>().value != checkVal)
+                        {
+                            break;
                         }
+                        // If values are the same, you can move by merge
+                        return true;
                     }
-                }
-            }
-        }
-        // Up
-        else if(z_input > 0) {
-            canMove = false;
-            SimulateMove(x_input, z_input);
-            for(int x = 0; x<x_size; x++) {
-                for(int z = 0; z<z_size; z++) {
-                    if(simulationTable[x,z,0] != null) {
-                        simulationTable[x,z,0].GetComponent<BlockScript>().movePhase(new Vector3(x, 0, z), Vector3.forward);
-                        if(simulationTable[x,z,1] != null) {
-                            simulationTable[x,z,1].GetComponent<BlockScript>().movePhase(new Vector3(x, 0, z), Vector3.forward);
-                        }
+                    // If there are no block nex to it, move is always possible
+                    else
+                    {
+                        return true;
                     }
                 }
             }
         }
         // Down
-        else if(z_input < 0) {
-            canMove = false;
-            SimulateMove(x_input, z_input);
-            for(int x = 0; x<x_size; x++) {
-                for(int z = z_size-1; z>=0; z--) {
-                    if(simulationTable[x,z,0] != null) {
-                        simulationTable[x,z,0].GetComponent<BlockScript>().movePhase(new Vector3(x, 0, z), Vector3.back);
-                        if(simulationTable[x,z,1] != null) {
-                            simulationTable[x,z,1].GetComponent<BlockScript>().movePhase(new Vector3(x, 0, z), Vector3.back);
+        for (int z = 1; z < z_size; z++)
+        {
+            for (int x = 0; x < x_size; x++)
+            {
+                // If there are any free place on grid, move is always possible
+                if (simulationTable[x, z, 0] == null)
+                {
+                    return true;
+                }
+                // Otherwise, check if this block (x,z) can move
+                int checkVal = simulationTable[x, z, 0].GetComponent<BlockScript>().value;
+                for (int i = z - 1; i >= 0; i--)
+                {
+                    // If there are some block next to it
+                    if (simulationTable[x, i, 0] != null)
+                    {
+                        // Check if it hase the same value. If not, this (x,z) block can't move there,
+                        // break from this loop and check another block
+                        if (simulationTable[x, i, 0].GetComponent<BlockScript>().value != checkVal)
+                        {
+                            break;
                         }
+                        // If values are the same, you can move by merge
+                        return true;
+                    }
+                    // If there are no block nex to it, move is always possible
+                    else
+                    {
+                        return true;
                     }
                 }
             }
         }
+        // Left
+        for (int z = 0; z < z_size; z++)
+        {
+            for (int x = 1; x < x_size; x++)
+            {
+                // If there are any free place on grid, move is always possible
+                if (simulationTable[x, z, 0] == null)
+                {
+                    return true;
+                }
+                // Otherwise, check if this block (x,z) can move
+                int checkVal = simulationTable[x, z, 0].GetComponent<BlockScript>().value;
+                for (int i = x - 1; i >= 0; i--)
+                {
+                    // If there are some block next to it
+                    if (simulationTable[i, z, 0] != null)
+                    {
+                        // Check if it hase the same value. If not, this (x,z) block can't move there,
+                        // break from this loop and check another block
+                        if (simulationTable[i, z, 0].GetComponent<BlockScript>().value != checkVal)
+                        {
+                            break;
+                        }
+                        // If values are the same, you can move by merge
+                        return true;
+                    }
+                    // If there are no block nex to it, move is always possible
+                    else
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        // Top
+        for (int z = z_size - 2; z >= 0; z--)
+        {
+            for (int x = 0; x < x_size; x++)
+            {
+                // If there are any free place on grid, move is always possible
+                if (simulationTable[x, z, 0] == null)
+                {
+                    return true;
+                }
+                // Otherwise, check if this block (x,z) can move
+                int checkVal = simulationTable[x, z, 0].GetComponent<BlockScript>().value;
+                for (int i = z + 1; i < z_size; i++)
+                {
+                    // If there are some block next to it
+                    if (simulationTable[x, i, 0] != null)
+                    {
+                        // Check if it hase the same value. If not, this (x,z) block can't move there,
+                        // break from this loop and check another block
+                        if (simulationTable[x, i, 0].GetComponent<BlockScript>().value != checkVal)
+                        {
+                            break;
+                        }
+                        // If values are the same, you can move by merge
+                        return true;
+                    }
+                    // If there are no block nex to it, move is always possible
+                    else
+                    {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    public bool MoveBlocks(float x_input, float z_input) {
+        bool anyBlockMoved = false;
+        // Right
+        if(x_input > 0) {
+            canMove = false;
+            if(SimulateMove(x_input, z_input)) 
+            {
+                anyBlockMoved = true;
+                for (int z = 0; z < z_size; z++)
+                {
+                    for (int x = x_size - 1; x >= 0; x--)
+                    {
+                        if (simulationTable[x, z, 0] != null)
+                        {
+                            simulationTable[x, z, 0].GetComponent<BlockScript>().movePhase(new Vector3(x, 0, z), Vector3.right);
+                            if (simulationTable[x, z, 1] != null)
+                            {
+                                simulationTable[x, z, 1].GetComponent<BlockScript>().movePhase(new Vector3(x, 0, z), Vector3.right);
+                            }
+                        }
+                    }
+                }
+            }
+            
+        }
+        // Left
+        else if(x_input < 0) {
+            canMove = false;
+            if(SimulateMove(x_input, z_input))
+            {
+                anyBlockMoved = true;
+                for (int z = 0; z < z_size; z++)
+                {
+                    for (int x = 0; x < x_size; x++)
+                    {
+                        if (simulationTable[x, z, 0] != null)
+                        {
+                            simulationTable[x, z, 0].GetComponent<BlockScript>().movePhase(new Vector3(x, 0, z), Vector3.left);
+                            if (simulationTable[x, z, 1] != null)
+                            {
+                                simulationTable[x, z, 1].GetComponent<BlockScript>().movePhase(new Vector3(x, 0, z), Vector3.left);
+                            }
+                        }
+                    }
+                }
+            }
+            
+        }
+        // Up
+        else if(z_input > 0) {
+            canMove = false;
+            if(SimulateMove(x_input, z_input))
+            {
+                anyBlockMoved = true;
+                for (int x = 0; x < x_size; x++)
+                {
+                    for (int z = 0; z < z_size; z++)
+                    {
+                        if (simulationTable[x, z, 0] != null)
+                        {
+                            simulationTable[x, z, 0].GetComponent<BlockScript>().movePhase(new Vector3(x, 0, z), Vector3.forward);
+                            if (simulationTable[x, z, 1] != null)
+                            {
+                                simulationTable[x, z, 1].GetComponent<BlockScript>().movePhase(new Vector3(x, 0, z), Vector3.forward);
+                            }
+                        }
+                    }
+                }
+            }
+            
+        }
+        // Down
+        else if(z_input < 0) {
+            canMove = false;
+            if(SimulateMove(x_input, z_input))
+            {
+                anyBlockMoved = true;
+                for (int x = 0; x < x_size; x++)
+                {
+                    for (int z = z_size - 1; z >= 0; z--)
+                    {
+                        if (simulationTable[x, z, 0] != null)
+                        {
+                            simulationTable[x, z, 0].GetComponent<BlockScript>().movePhase(new Vector3(x, 0, z), Vector3.back);
+                            if (simulationTable[x, z, 1] != null)
+                            {
+                                simulationTable[x, z, 1].GetComponent<BlockScript>().movePhase(new Vector3(x, 0, z), Vector3.back);
+                            }
+                        }
+                    }
+                }
+            }
+            
+        }
+        if(!anyBlockMoved)
+            canMove = true;
+        return anyBlockMoved;
     }
 
     public static void MergeBlocks() {
+        int newScore = 0;
         foreach(Pair<GameObject, GameObject> pair in mergePairs) {
-            pair.x.GetComponent<BlockScript>().changeValueTimesTwo();
+            BlockScript firstBlockScript = pair.x.GetComponent<BlockScript>();
+            firstBlockScript.changeValueTimesTwo();
             Destroy(pair.y);
-            //simulationTable[(int)pair.x.transform.position.x, (int)pair.x.transform.position.z,1] = null;
+            newScore += firstBlockScript.value;
+        }
+        if(newScore != 0)
+        {
+            AudioManager.instance.Play("Merge");
         }
         mergePairs.Clear();
+        onScoreUpdate?.Invoke(newScore);
     }
 
     public static void generateBlock(float x, float z, int value) {
@@ -321,13 +574,29 @@ public class GameMechanics : MonoBehaviour
         }
         if(index == -1)
             return new Coords(-1,-1);
-        return result[Random.Range(0, index-1)];
+        return result[UnityEngine.Random.Range(0, index-1)];
 
     }
 
     public static void randomBlock() {
         Coords freeCord = listFree();
-        generateBlock(freeCord.x, freeCord.y, 1);
+        // Generate if there was free coord
+        if(freeCord.x != -1)
+        {
+            generateBlock(freeCord.x, freeCord.y, 1);
+        }
+        // Otherwise start gameOver phase
+        else
+        {
+            runGameOver();
+        }
+
+        // Check if move if possible after generating block
+        if(!checkIfMovePossible())
+        {
+            runGameOver();
+        }
+        
     }
 
     public static void changeBlocksMoving(int val) {
@@ -335,8 +604,31 @@ public class GameMechanics : MonoBehaviour
         if(blocksMoving == 0) {
             MergeBlocks();
             randomBlock();
-            printSim();
             canMove = true;
         }
+    }
+
+    void cameraPositionSet()
+    {
+        camRef.transform.position = new Vector3(terrainObj.transform.position.x, camRef.transform.position.y, terrainObj.transform.position.z);
+    }
+
+    public static void runGameOver()
+    {
+        canMove = false;
+        gameOverObj.gameObject.SetActive(true);
+    }
+
+    public static void restartGame()
+    {
+        canMove = true;
+        gameOverObj.gameObject.SetActive(false);
+        SceneManager.LoadScene("SampleScene");
+        ScoreScript.instance.ClearScore();
+    }
+
+    public static void endGame()
+    {
+        Application.Quit();
     }
 }
